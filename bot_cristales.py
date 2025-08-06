@@ -111,8 +111,8 @@ def home():
     return "Bot de Cristales activo ✅"
 
 # Ruta para búsqueda desde el navegador
-@app.route("/buscar", methods=["GET"])
-def buscar():
+@app.route("/webhook", methods=["POST"])
+def webhook():
     q = request.args.get("q")
     if not q:
         return jsonify({"error": "Falta parámetro q"}), 400
