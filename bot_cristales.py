@@ -29,33 +29,42 @@ conn.commit()
 # FUNCIONES
 # ========================
 def cargar_precios_desde_pdf(pdf_path):
+    print(f"📄 Cargando precios desde: {pdf_path}")
     descripcion_actual = None
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            for line in page.extract_text().split('\n'):
-                line = line.strip()
-                if not line:
-                    continue
-                precio_match = re.search(r"(\d{1,3}(?:\.\d{3})*,\d{2})", line)
-                codigo_match = re.match(r"^[A-Z0-9]{3,6}$", line)
-                if "MOD." in line or "PSAS" in line or "PUERTA" in line or "LUNETA" in line or "VENTANA" in line:
-                    descripcion_actual = line
-                elif codigo_match:
-                    codigo_actual = codigo_match.group(0)
-                elif precio_match and descripcion_actual:
-                    precio = float(precio_match.group(1).replace('.', '').replace(',', '.'))
-                    cursor.execute("INSERT OR REPLACE INTO precios VALUES (?, ?, ?)",
-                                   (codigo_actual, descripcion_actual, precio))
-                    cursor.execute("INSERT OR IGNORE INTO inventario (codigo, stock) VALUES (?, 0)", (codigo_actual,))
-                    descripcion_actual = None
-    conn.commit()
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                for line in page.extract_text().split('\n'):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    precio_match = re.search(r"(\d{1,3}(?:\.\d{3})*,\d{2})", line)
+                    codigo_match = re.match(r"^[A-Z0-9]{3,6}$", line)
+                    if "MOD." in line or "PSAS" in line or "PUERTA" in line or "LUNETA" in line or "VENTANA" in line:
+                        descripcion_actual = line
+                    elif codigo_match:
+                        codigo_actual = codigo_match.group(0)
+                    elif precio_match and descripcion_actual:
+                        precio = float(precio_match.group(1).replace('.', '').replace(',', '.'))
+                        cursor.execute("INSERT OR REPLACE INTO precios VALUES (?, ?, ?)",
+                                       (codigo_actual, descripcion_actual, precio))
+                        cursor.execute("INSERT OR IGNORE INTO inventario (codigo, stock) VALUES (?, 0)", (codigo_actual,))
+                        descripcion_actual = None
+        conn.commit()
+        print("✅ Lista de precios cargada correctamente.")
+    except Exception as e:
+        print(f"⚠️ Error al cargar PDF: {e}")
+
+# ✅ Forzar carga de datos al iniciar en Render
+db_pdf = "ListaPreciosFavicurAutomotor MARZO 2025.pdf"
+if os.path.exists(db_pdf):
+    cargar_precios_desde_pdf(db_pdf)
+else:
+    print(f"⚠️ No se encontró el archivo {db_pdf} en Render.")
 
 # ========================
 # FLASK APP
 # ========================
-# Si la base de datos no existe en Render, la cargamos desde el PDF
-if not os.path.exists("cristales.db"):
-    cargar_precios_desde_pdf("ListaPreciosFavicurAutomotor MARZO 2025.pdf")
 app = Flask(__name__)
 
 @app.route("/")
@@ -97,7 +106,7 @@ def webhook():
     twiml = f"<?xml version='1.0'?><Response><Message>{respuesta}</Message></Response>"
     return Response(twiml, mimetype='application/xml')
 
-# ✅ Render necesita esto
+# ✅ Render usa puerto dinámico
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
