@@ -26,36 +26,40 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS inventario (
 conn.commit()
 
 # ========================
-# FUNCIONES
+# LECTOR PDF MEJORADO
 # ========================
 def cargar_precios_desde_pdf(pdf_path):
-    print(f"📄 Cargando precios desde: {pdf_path}")
-    descripcion_actual = None
+    print(f"📄 Intentando cargar datos desde: {pdf_path}")
+    registros = 0
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
-                for line in page.extract_text().split('\n'):
-                    line = line.strip()
-                    if not line:
+                texto = page.extract_text()
+                if not texto:
+                    continue
+                for linea in texto.split('\n'):
+                    linea = linea.strip()
+                    if not linea:
                         continue
-                    precio_match = re.search(r"(\d{1,3}(?:\.\d{3})*,\d{2})", line)
-                    codigo_match = re.match(r"^[A-Z0-9]{3,6}$", line)
-                    if "MOD." in line or "PSAS" in line or "PUERTA" in line or "LUNETA" in line or "VENTANA" in line:
-                        descripcion_actual = line
-                    elif codigo_match:
-                        codigo_actual = codigo_match.group(0)
-                    elif precio_match and descripcion_actual:
+                    precio_match = re.search(r"(\d{1,3}(?:\.\d{3})*,\d{2})", linea)
+                    if precio_match:
                         precio = float(precio_match.group(1).replace('.', '').replace(',', '.'))
-                        cursor.execute("INSERT OR REPLACE INTO precios VALUES (?, ?, ?)",
-                                       (codigo_actual, descripcion_actual, precio))
-                        cursor.execute("INSERT OR IGNORE INTO inventario (codigo, stock) VALUES (?, 0)", (codigo_actual,))
-                        descripcion_actual = None
+                        partes = linea.split()
+                        codigo = partes[0][:10]  # Tomar la primera palabra como código tentativo
+                        descripcion = linea
+                        try:
+                            cursor.execute("INSERT OR REPLACE INTO precios VALUES (?, ?, ?)",
+                                           (codigo, descripcion, precio))
+                            cursor.execute("INSERT OR IGNORE INTO inventario (codigo, stock) VALUES (?, 0)", (codigo,))
+                            registros += 1
+                        except Exception as e:
+                            print(f"⚠️ Error insertando línea: {e}")
         conn.commit()
-        print("✅ Lista de precios cargada correctamente.")
+        print(f"✅ Carga completada. Total registros: {registros}")
     except Exception as e:
-        print(f"⚠️ Error al cargar PDF: {e}")
+        print(f"⚠️ Error leyendo PDF: {e}")
 
-# ✅ Forzar carga de datos al iniciar en Render
+# ✅ Forzar carga del PDF siempre al arrancar
 db_pdf = "ListaPreciosFavicurAutomotor MARZO 2025.pdf"
 if os.path.exists(db_pdf):
     cargar_precios_desde_pdf(db_pdf)
@@ -79,7 +83,7 @@ def api_buscar():
     try:
         palabras = q.lower().split()
         where_clause = " AND ".join([f"lower(descripcion) LIKE '%{p}%'" for p in palabras])
-        cursor.execute(f"SELECT * FROM precios WHERE {where_clause} LIMIT 5")
+        cursor.execute(f"SELECT * FROM precios WHERE {where_clause} LIMIT 10")
         resultados = cursor.fetchall()
         return jsonify(resultados)
     except Exception as e:
@@ -96,7 +100,7 @@ def webhook():
         try:
             palabras = query.lower().split()
             where_clause = " AND ".join([f"lower(descripcion) LIKE '%{p}%'" for p in palabras])
-            cursor.execute(f"SELECT * FROM precios WHERE {where_clause} LIMIT 3")
+            cursor.execute(f"SELECT * FROM precios WHERE {where_clause} LIMIT 5")
             resultados = cursor.fetchall()
             if resultados:
                 respuesta = "\n".join([f"✅ {r[0]} | {r[1]} | ${r[2]:,.2f}" for r in resultados])
