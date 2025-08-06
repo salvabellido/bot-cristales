@@ -106,25 +106,26 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 # Ruta principal: muestra mensaje de prueba
-@app.route("/")
-def home():
-    return "Bot de Cristales activo ✅"
-
-# Ruta para búsqueda desde el navegador
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    q = request.args.get("q")
-    if not q:
-        return jsonify({"error": "Falta parámetro q"}), 400
-    
-    try:
-        palabras = q.lower().split()
-        where_clause = " AND ".join([f"lower(descripcion) LIKE '%{p}%'" for p in palabras])
-        cursor.execute(f"SELECT * FROM precios WHERE {where_clause} LIMIT 5")
-        resultados = cursor.fetchall()
-        return jsonify(resultados)
-    except Exception as e:
-        # Captura y muestra el error exacto
-        return jsonify({"error": str(e)}), 500
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+    from flask import Response
+    data = request.form
+    mensaje = data.get("Body", "").strip()
+    respuesta = "❌ No encontré resultados."
+
+    # Si el mensaje comienza con 'buscar', realizamos la búsqueda en la base
+    if mensaje.lower().startswith("buscar"):
+        query = mensaje[6:].strip()
+        try:
+            palabras = query.lower().split()
+            where_clause = " AND ".join([f"lower(descripcion) LIKE '%{p}%'" for p in palabras])
+            cursor.execute(f"SELECT * FROM precios WHERE {where_clause} LIMIT 3")
+            resultados = cursor.fetchall()
+            if resultados:
+                respuesta = "\\n".join([f\"✅ {r[0]} | {r[1]} | ${r[2]:,.2f}\" for r in resultados])
+        except Exception as e:
+            respuesta = f\"⚠️ Error interno: {e}\"
+
+    # Respuesta en formato XML para Twilio
+    twiml = f\"<?xml version='1.0'?><Response><Message>{respuesta}</Message></Response>\"
+    return Response(twiml, mimetype='application/xml')
