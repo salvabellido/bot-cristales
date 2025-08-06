@@ -54,6 +54,9 @@ def cargar_precios_desde_pdf(pdf_path):
 # FLASK APP
 # ========================
 app = Flask(__name__)
+# Si la base de datos no existe en Render, la cargamos desde el PDF
+if not os.path.exists("cristales.db"):
+    cargar_precios_desde_pdf("ListaPreciosFavicurAutomotor MARZO 2025.pdf")
 
 @app.route("/")
 def home():
