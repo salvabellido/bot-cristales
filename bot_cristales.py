@@ -90,7 +90,7 @@ def api_buscar():
     try:
         palabras = q.lower().split()
         where_clause = " AND ".join([f"lower(descripcion) LIKE '%{p}%'" for p in palabras])
-        cursor.execute(f"SELECT * FROM precios WHERE {where_clause} LIMIT 10")
+        cursor.execute(f"SELECT p.codigo, p.descripcion, p.precio, IFNULL(i.stock,0) FROM precios p LEFT JOIN inventario i ON p.codigo=i.codigo WHERE {where_clause} LIMIT 10")
         resultados = cursor.fetchall()
         return jsonify(resultados)
     except Exception as e:
@@ -103,21 +103,30 @@ def api_buscar():
 def webhook():
     data = request.form
     mensaje = data.get("Body", "").strip()
-    respuesta = "❌ No entendí tu solicitud. Usa: buscar <modelo>, stock <codigo>, agregar <codigo> <cant>, restar <codigo> <cant>."
+    respuesta = "❌ No entendí tu solicitud. Usa: buscar <modelo>, buscarcodigo <codigo>, stock <codigo>, agregar <codigo> <cant>, restar <codigo> <cant>."
 
-    if mensaje.lower().startswith("buscar"):
-        query = mensaje[6:].strip()
+    if mensaje.lower().startswith("buscar "):
+        query = mensaje[7:].strip()
         try:
             palabras = query.lower().split()
-            where_clause = " AND ".join([f"lower(descripcion) LIKE '%{p}%'" for p in palabras])
-            cursor.execute(f"SELECT * FROM precios WHERE {where_clause} LIMIT 5")
+            where_clause = " AND ".join([f"lower(p.descripcion) LIKE '%{p}%'" for p in palabras])
+            cursor.execute(f"SELECT p.codigo, p.descripcion, p.precio, IFNULL(i.stock,0) FROM precios p LEFT JOIN inventario i ON p.codigo=i.codigo WHERE {where_clause} LIMIT 5")
             resultados = cursor.fetchall()
             if resultados:
-                respuesta = "\n".join([f"✅ {r[0]} | {r[1]} | ${r[2]:,.2f}" for r in resultados])
+                respuesta = "\n".join([f"✅ {r[0]} | {r[1]} | ${r[2]:,.2f} | Stock: {r[3]}" for r in resultados])
             else:
                 respuesta = "❌ No se encontraron resultados."
         except Exception as e:
             respuesta = f"⚠️ Error interno: {e}"
+
+    elif mensaje.lower().startswith("buscarcodigo"):
+        codigo = mensaje[12:].strip()
+        cursor.execute("SELECT p.codigo, p.descripcion, p.precio, IFNULL(i.stock,0) FROM precios p LEFT JOIN inventario i ON p.codigo=i.codigo WHERE p.codigo=?", (codigo,))
+        datos = cursor.fetchone()
+        if datos:
+            respuesta = f"✅ {datos[0]} | {datos[1]} | ${datos[2]:,.2f} | Stock: {datos[3]}"
+        else:
+            respuesta = "❌ Código no encontrado."
 
     elif mensaje.lower().startswith("stock"):
         codigo = mensaje[5:].strip()
