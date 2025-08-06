@@ -26,14 +26,19 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS inventario (
 conn.commit()
 
 # ========================
-# LECTOR PDF MEJORADO
+# LECTOR PDF OPTIMIZADO
 # ========================
 def cargar_precios_desde_pdf(pdf_path):
-    print(f"📄 Intentando cargar datos desde: {pdf_path}")
-    registros = 0
+    cursor.execute("SELECT COUNT(*) FROM precios")
+    if cursor.fetchone()[0] > 0:
+        print("ℹ️ La base de datos ya contiene registros, no se recargará el PDF.")
+        return
+
+    print(f"📄 Cargando datos desde {pdf_path}...")
+    batch = []
     try:
         with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
+            for page_num, page in enumerate(pdf.pages, start=1):
                 texto = page.extract_text()
                 if not texto:
                     continue
@@ -45,26 +50,27 @@ def cargar_precios_desde_pdf(pdf_path):
                     if precio_match:
                         precio = float(precio_match.group(1).replace('.', '').replace(',', '.'))
                         partes = linea.split()
-                        codigo = partes[0][:10]  # Tomar la primera palabra como código tentativo
+                        codigo = partes[0][:10]
                         descripcion = linea
-                        try:
-                            cursor.execute("INSERT OR REPLACE INTO precios VALUES (?, ?, ?)",
-                                           (codigo, descripcion, precio))
-                            cursor.execute("INSERT OR IGNORE INTO inventario (codigo, stock) VALUES (?, 0)", (codigo,))
-                            registros += 1
-                        except Exception as e:
-                            print(f"⚠️ Error insertando línea: {e}")
-        conn.commit()
-        print(f"✅ Carga completada. Total registros: {registros}")
+                        batch.append((codigo, descripcion, precio))
+                        if len(batch) >= 1000:
+                            cursor.executemany("INSERT OR REPLACE INTO precios VALUES (?, ?, ?)", batch)
+                            conn.commit()
+                            batch.clear()
+                print(f"✅ Página {page_num} procesada")
+        if batch:
+            cursor.executemany("INSERT OR REPLACE INTO precios VALUES (?, ?, ?)", batch)
+            conn.commit()
+        print("✅ Carga finalizada con éxito")
     except Exception as e:
-        print(f"⚠️ Error leyendo PDF: {e}")
+        print(f"⚠️ Error al procesar PDF: {e}")
 
-# ✅ Forzar carga del PDF siempre al arrancar
+# ✅ Cargar solo si existe el PDF y la DB está vacía
 db_pdf = "ListaPreciosFavicurAutomotor MARZO 2025.pdf"
 if os.path.exists(db_pdf):
     cargar_precios_desde_pdf(db_pdf)
 else:
-    print(f"⚠️ No se encontró el archivo {db_pdf} en Render.")
+    print(f"⚠️ PDF no encontrado: {db_pdf}")
 
 # ========================
 # FLASK APP
