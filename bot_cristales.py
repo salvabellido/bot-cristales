@@ -53,6 +53,7 @@ def cargar_precios_desde_pdf(pdf_path):
                         codigo = partes[0][:10]
                         descripcion = linea
                         batch.append((codigo, descripcion, precio))
+                        cursor.execute("INSERT OR IGNORE INTO inventario (codigo, stock) VALUES (?, 0)", (codigo,))
                         if len(batch) >= 1000:
                             cursor.executemany("INSERT OR REPLACE INTO precios VALUES (?, ?, ?)", batch)
                             conn.commit()
@@ -95,11 +96,14 @@ def api_buscar():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ========================
+# WEBHOOK WHATSAPP (BÚSQUEDA + INVENTARIO)
+# ========================
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.form
     mensaje = data.get("Body", "").strip()
-    respuesta = "❌ No encontré resultados."
+    respuesta = "❌ No entendí tu solicitud. Usa: buscar <modelo>, stock <codigo>, agregar <codigo> <cant>, restar <codigo> <cant>."
 
     if mensaje.lower().startswith("buscar"):
         query = mensaje[6:].strip()
@@ -110,8 +114,50 @@ def webhook():
             resultados = cursor.fetchall()
             if resultados:
                 respuesta = "\n".join([f"✅ {r[0]} | {r[1]} | ${r[2]:,.2f}" for r in resultados])
+            else:
+                respuesta = "❌ No se encontraron resultados."
         except Exception as e:
             respuesta = f"⚠️ Error interno: {e}"
+
+    elif mensaje.lower().startswith("stock"):
+        codigo = mensaje[5:].strip()
+        cursor.execute("SELECT stock FROM inventario WHERE codigo=?", (codigo,))
+        stock = cursor.fetchone()
+        if stock:
+            respuesta = f"📦 Stock de {codigo}: {stock[0]} unidades."
+        else:
+            respuesta = "❌ Código no encontrado."
+
+    elif mensaje.lower().startswith("agregar"):
+        partes = mensaje.split()
+        if len(partes) == 3 and partes[2].isdigit():
+            codigo, cantidad = partes[1], int(partes[2])
+            cursor.execute("UPDATE inventario SET stock = stock + ? WHERE codigo=?", (cantidad, codigo))
+            if cursor.rowcount > 0:
+                conn.commit()
+                cursor.execute("SELECT stock FROM inventario WHERE codigo=?", (codigo,))
+                nuevo_stock = cursor.fetchone()[0]
+                respuesta = f"✅ Stock actualizado: {codigo} ahora tiene {nuevo_stock} unidades."
+            else:
+                respuesta = "❌ Código no encontrado."
+        else:
+            respuesta = "⚠️ Usa: agregar <codigo> <cantidad>"
+
+    elif mensaje.lower().startswith("restar"):
+        partes = mensaje.split()
+        if len(partes) == 3 and partes[2].isdigit():
+            codigo, cantidad = partes[1], int(partes[2])
+            cursor.execute("SELECT stock FROM inventario WHERE codigo=?", (codigo,))
+            stock = cursor.fetchone()
+            if stock:
+                nuevo_stock = max(0, stock[0] - cantidad)
+                cursor.execute("UPDATE inventario SET stock=? WHERE codigo=?", (nuevo_stock, codigo))
+                conn.commit()
+                respuesta = f"📉 Stock actualizado: {codigo} ahora tiene {nuevo_stock} unidades."
+            else:
+                respuesta = "❌ Código no encontrado."
+        else:
+            respuesta = "⚠️ Usa: restar <codigo> <cantidad>"
 
     twiml = f"<?xml version='1.0'?><Response><Message>{respuesta}</Message></Response>"
     return Response(twiml, mimetype='application/xml')
